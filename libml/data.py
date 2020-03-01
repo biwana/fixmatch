@@ -223,7 +223,7 @@ class DataSet:
 
 class DataSets:
     def __init__(self, name, train_labeled: DataSet, train_unlabeled: DataSet, test: DataSet, valid: DataSet,
-                 height=32, width=32, colors=3, nclass=10, mean=0, std=1, p_labeled=None, p_unlabeled=None):
+                 height=224, width=224, colors=3, nclass=5, mean=0, std=1, p_labeled=None, p_unlabeled=None):
         self.name = name
         self.train_labeled = train_labeled
         self.train_unlabeled = train_unlabeled
@@ -239,12 +239,11 @@ class DataSets:
         self.p_unlabeled = p_unlabeled
 
     @classmethod
-    def creator(cls, name, seed, label, valid, augment, parse_fn=record_parse, do_memoize=False,
-                nclass=10, colors=3, height=32, width=32):
+    def creator(cls, name, valid, augment, parse_fn=record_parse, do_memoize=False,
+                nclass=5, colors=3, height=224, width=224):
         if not isinstance(augment, list):
             augment = augment(name)
-        fullname = '.%d@%d' % (seed, label)
-        root = os.path.join(DATA_DIR, 'SSL2', name)
+        root = os.path.join(DATA_DIR, name)
 
         def create():
             p_labeled = p_unlabeled = None
@@ -256,9 +255,9 @@ class DataSets:
 
             image_shape = [height, width, colors]
             train_labeled = DataSet.from_files(
-                [root + fullname + '-label.tfrecord'], augment[0], parse_fn, image_shape)
+                [root + '-train.tfrecord'], augment[0], parse_fn, image_shape)
             train_unlabeled = DataSet.from_files(
-                [root + '-unlabel.tfrecord'], augment[1], parse_fn, image_shape)
+                [root + '-unlabeled.tfrecord'], augment[1], parse_fn, image_shape)
             if do_memoize:
                 train_labeled = train_labeled.memoize()
                 train_unlabeled = train_unlabeled.memoize()
@@ -271,7 +270,7 @@ class DataSets:
             test_data = DataSet.from_files(
                 [os.path.join(DATA_DIR, '%s-test.tfrecord' % name)], NOAUGMENT, parse_fn, image_shape=image_shape)
 
-            return cls(name + '.' + FLAGS.augment + fullname + '-' + str(valid)
+            return cls(name + '.' + FLAGS.augment + '-' + str(valid)
                        + ('/' + FLAGS.p_unlabeled if FLAGS.p_unlabeled else ''),
                        train_labeled=train_labeled,
                        train_unlabeled=train_unlabeled.skip(valid),
@@ -280,24 +279,12 @@ class DataSets:
                        nclass=nclass, p_labeled=p_labeled, p_unlabeled=p_unlabeled,
                        height=height, width=width, colors=colors, mean=mean, std=std)
 
-        return name + fullname + '-' + str(valid), create
+        return name, create
 
 
 def create_datasets(augment_fn):
     d = {}
-    d.update([DataSets.creator('cifar10', seed, label, valid, augment_fn)
-              for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
-    d.update([DataSets.creator('cifar100', seed, label, valid, augment_fn, nclass=100)
-              for seed, label, valid in itertools.product(range(6), [400, 1000, 2500, 10000], [1, 5000])])
-    d.update([DataSets.creator('fashion_mnist', seed, label, valid, augment_fn, height=32, width=32, colors=1,
-                               parse_fn=record_parse_mnist)
-              for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
-    d.update([DataSets.creator('stl10', seed, label, valid, augment_fn, height=96, width=96)
-              for seed, label, valid in itertools.product(range(6), [1000, 5000], [1, 500])])
-    d.update([DataSets.creator('svhn', seed, label, valid, augment_fn)
-              for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
-    d.update([DataSets.creator('svhn_noextra', seed, label, valid, augment_fn)
-              for seed, label, valid in itertools.product(range(6), [10 * x for x in SAMPLES_PER_CLASS], [1, 5000])])
+    d.update([DataSets.creator('fold_%d'%fold, 100, augment_fn) for fold in range(5)])
     return d
 
 

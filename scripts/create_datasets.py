@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # Copyright 2018 Google LLC
+# modified by Brian K. Iwana
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,13 +34,56 @@ from tqdm import trange
 from libml import data as libml_data
 from libml.utils import EasyDict
 
-URLS = {
-    'svhn': 'http://ufldl.stanford.edu/housenumbers/{}_32x32.mat',
-    'cifar10': 'https://www.cs.toronto.edu/~kriz/cifar-10-matlab.tar.gz',
-    'cifar100': 'https://www.cs.toronto.edu/~kriz/cifar-100-matlab.tar.gz',
-    'stl10': 'http://ai.stanford.edu/~acoates/stl10/stl10_binary.tar.gz',
-}
+def _load_fold_0():
+    return _load_fold(0)
 
+def _load_fold_1():
+    return _load_fold(1)
+
+def _load_fold_2():
+    return _load_fold(2)
+
+def _load_fold_3():
+    return _load_fold(3)
+
+def _load_fold_4():
+    return _load_fold(4)
+
+def _load_fold(fold):
+    def unflatten(images):
+        return np.transpose(images.reshape((-1, 3, 224, 224)),
+                            [0, 3, 2, 1])
+    
+    input_shape=(224,224,3)
+
+    y_train_filename = os.path.join("data", "train_fold_%d.txt"%fold)
+    y_test_filename = os.path.join("data", "test_fold_%d.txt"%fold)
+    y_unsupervised_train_filename = os.path.join("data", "unsupervised_train.txt")
+
+    l_train = np.genfromtxt(y_train_filename, usecols=[1], delimiter=" ", dtype='int32')
+
+    f_train = np.genfromtxt(y_train_filename, usecols=[0], delimiter=" ", dtype='str')
+    f_test = np.genfromtxt(y_test_filename, usecols=[0], dtype='str')
+    f_unsupervised_train = np.genfromtxt(y_unsupervised_train_filename, usecols=[0], dtype='str')
+
+    x_train = np.zeros((np.size(f_train), input_shape[0], input_shape[1], input_shape[2]))
+    x_test = np.zeros((np.size(f_test), input_shape[0], input_shape[1], input_shape[2]))
+    x_unsupervised_train = np.zeros((np.size(f_unsupervised_train), input_shape[0], input_shape[1], input_shape[2]))
+
+
+    train_set = {'images': x_train,
+                 'labels': l_train}
+
+    test_set = {'images': x_test,
+                'labels': np.zeros(x_test.shape[0], dtype=np.uint8)}
+
+    unlabeled_set = {'images': x_unsupervised_train,
+                     'labels': np.zeros(x_unsupervised_train.shape[0], dtype=np.uint8)}
+
+    train_set['images'] = _encode_png(unflatten(train_set['images']))
+    test_set['images'] = _encode_png(unflatten(test_set['images']))
+    unlabeled_set['images'] = _encode_png(unflatten(unlabeled_set['images']))
+    return dict(train=train_set, test=test_set, unlabeled=unlabeled_set)
 
 def _encode_png(images):
     raw = []
@@ -49,133 +93,6 @@ def _encode_png(images):
         for x in trange(images.shape[0], desc='PNG Encoding', leave=False):
             raw.append(sess.run(to_png, feed_dict={image_x: images[x]}))
     return raw
-
-
-def _load_svhn():
-    splits = collections.OrderedDict()
-    for split in ['train', 'test', 'extra']:
-        with tempfile.NamedTemporaryFile() as f:
-            request.urlretrieve(URLS['svhn'].format(split), f.name)
-            data_dict = scipy.io.loadmat(f.name)
-        dataset = {}
-        dataset['images'] = np.transpose(data_dict['X'], [3, 0, 1, 2])
-        dataset['images'] = _encode_png(dataset['images'])
-        dataset['labels'] = data_dict['y'].reshape((-1))
-        # SVHN raw data uses labels from 1 to 10; use 0 to 9 instead.
-        dataset['labels'] -= 1
-        splits[split] = dataset
-    return splits
-
-
-def _load_stl10():
-    def unflatten(images):
-        return np.transpose(images.reshape((-1, 3, 96, 96)),
-                            [0, 3, 2, 1])
-
-    with tempfile.NamedTemporaryFile() as f:
-        if tf.gfile.Exists('stl10/stl10_binary.tar.gz'):
-            f = tf.gfile.Open('stl10/stl10_binary.tar.gz', 'rb')
-        else:
-            request.urlretrieve(URLS['stl10'], f.name)
-        tar = tarfile.open(fileobj=f)
-        train_X = tar.extractfile('stl10_binary/train_X.bin')
-        train_y = tar.extractfile('stl10_binary/train_y.bin')
-
-        test_X = tar.extractfile('stl10_binary/test_X.bin')
-        test_y = tar.extractfile('stl10_binary/test_y.bin')
-
-        unlabeled_X = tar.extractfile('stl10_binary/unlabeled_X.bin')
-
-        train_set = {'images': np.frombuffer(train_X.read(), dtype=np.uint8),
-                     'labels': np.frombuffer(train_y.read(), dtype=np.uint8) - 1}
-
-        test_set = {'images': np.frombuffer(test_X.read(), dtype=np.uint8),
-                    'labels': np.frombuffer(test_y.read(), dtype=np.uint8) - 1}
-
-        _imgs = np.frombuffer(unlabeled_X.read(), dtype=np.uint8)
-        unlabeled_set = {'images': _imgs,
-                         'labels': np.zeros(100000, dtype=np.uint8)}
-
-        fold_indices = tar.extractfile('stl10_binary/fold_indices.txt').read()
-
-    train_set['images'] = _encode_png(unflatten(train_set['images']))
-    test_set['images'] = _encode_png(unflatten(test_set['images']))
-    unlabeled_set['images'] = _encode_png(unflatten(unlabeled_set['images']))
-    return dict(train=train_set, test=test_set, unlabeled=unlabeled_set,
-                files=[EasyDict(filename="stl10_fold_indices.txt", data=fold_indices)])
-
-
-def _load_cifar10():
-    def unflatten(images):
-        return np.transpose(images.reshape((images.shape[0], 3, 32, 32)),
-                            [0, 2, 3, 1])
-
-    with tempfile.NamedTemporaryFile() as f:
-        request.urlretrieve(URLS['cifar10'], f.name)
-        tar = tarfile.open(fileobj=f)
-        train_data_batches, train_data_labels = [], []
-        for batch in range(1, 6):
-            data_dict = scipy.io.loadmat(tar.extractfile(
-                'cifar-10-batches-mat/data_batch_{}.mat'.format(batch)))
-            train_data_batches.append(data_dict['data'])
-            train_data_labels.append(data_dict['labels'].flatten())
-        train_set = {'images': np.concatenate(train_data_batches, axis=0),
-                     'labels': np.concatenate(train_data_labels, axis=0)}
-        data_dict = scipy.io.loadmat(tar.extractfile(
-            'cifar-10-batches-mat/test_batch.mat'))
-        test_set = {'images': data_dict['data'],
-                    'labels': data_dict['labels'].flatten()}
-    train_set['images'] = _encode_png(unflatten(train_set['images']))
-    test_set['images'] = _encode_png(unflatten(test_set['images']))
-    return dict(train=train_set, test=test_set)
-
-
-def _load_cifar100():
-    def unflatten(images):
-        return np.transpose(images.reshape((images.shape[0], 3, 32, 32)),
-                            [0, 2, 3, 1])
-
-    with tempfile.NamedTemporaryFile() as f:
-        request.urlretrieve(URLS['cifar100'], f.name)
-        tar = tarfile.open(fileobj=f)
-        data_dict = scipy.io.loadmat(tar.extractfile('cifar-100-matlab/train.mat'))
-        train_set = {'images': data_dict['data'],
-                     'labels': data_dict['fine_labels'].flatten()}
-        data_dict = scipy.io.loadmat(tar.extractfile('cifar-100-matlab/test.mat'))
-        test_set = {'images': data_dict['data'],
-                    'labels': data_dict['fine_labels'].flatten()}
-    train_set['images'] = _encode_png(unflatten(train_set['images']))
-    test_set['images'] = _encode_png(unflatten(test_set['images']))
-    return dict(train=train_set, test=test_set)
-
-
-def _load_fashionmnist():
-    def _read32(data):
-        dt = np.dtype(np.uint32).newbyteorder('>')
-        return np.frombuffer(data.read(4), dtype=dt)[0]
-
-    image_filename = '{}-images-idx3-ubyte'
-    label_filename = '{}-labels-idx1-ubyte'
-    split_files = [('train', 'train'), ('test', 't10k')]
-    splits = {}
-    for split, split_file in split_files:
-        with tempfile.NamedTemporaryFile() as f:
-            request.urlretrieve(URLS['fashion_mnist'].format(image_filename.format(split_file)), f.name)
-            with gzip.GzipFile(fileobj=f, mode='r') as data:
-                assert _read32(data) == 2051
-                n_images = _read32(data)
-                row = _read32(data)
-                col = _read32(data)
-                images = np.frombuffer(data.read(n_images * row * col), dtype=np.uint8)
-                images = images.reshape((n_images, row, col, 1))
-        with tempfile.NamedTemporaryFile() as f:
-            request.urlretrieve(URLS['fashion_mnist'].format(label_filename.format(split_file)), f.name)
-            with gzip.GzipFile(fileobj=f, mode='r') as data:
-                assert _read32(data) == 2049
-                n_labels = _read32(data)
-                labels = np.frombuffer(data.read(n_labels), dtype=np.uint8)
-        splits[split] = {'images': _encode_png(images), 'labels': labels}
-    return splits
 
 
 def _int64_feature(value):
@@ -221,10 +138,11 @@ def _is_installed_folder(name, folder):
 
 
 CONFIGS = dict(
-    cifar10=dict(loader=_load_cifar10, checksums=dict(train=None, test=None)),
-    cifar100=dict(loader=_load_cifar100, checksums=dict(train=None, test=None)),
-    svhn=dict(loader=_load_svhn, checksums=dict(train=None, test=None, extra=None)),
-    stl10=dict(loader=_load_stl10, checksums=dict(train=None, test=None)),
+    fold_0=dict(loader=_load_fold_0, checksums=dict(train=None, test=None, unlabeledset=None)),
+    fold_1=dict(loader=_load_fold_1, checksums=dict(train=None, test=None, unlabeledset=None)),
+    fold_2=dict(loader=_load_fold_2, checksums=dict(train=None, test=None, unlabeledset=None)),
+    fold_3=dict(loader=_load_fold_3, checksums=dict(train=None, test=None, unlabeledset=None)),
+    fold_4=dict(loader=_load_fold_4, checksums=dict(train=None, test=None, unlabeledset=None)),
 )
 
 

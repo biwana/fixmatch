@@ -25,7 +25,6 @@ from libml import data, utils, augment, ctaugment
 
 FLAGS = flags.FLAGS
 
-
 class AugmentPoolCTACutOut(augment.AugmentPoolCTA):
     @staticmethod
     def numpy_apply_policies(arglist):
@@ -42,7 +41,7 @@ class AugmentPoolCTACutOut(augment.AugmentPoolCTA):
 
 
 class FixMatch(CTAReMixMatch):
-    AUGMENT_POOL_CLASS = AugmentPoolCTACutOut
+#     AUGMENT_POOL_CLASS = AugmentPoolCTACutOut
 
     def train(self, train_nimg, report_nimg):
         if FLAGS.eval_ckpt:
