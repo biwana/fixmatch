@@ -24,12 +24,13 @@ import os
 import tarfile
 import tempfile
 from urllib import request
+from PIL import Image
 
 import numpy as np
 import scipy.io
 import tensorflow as tf
 from absl import app
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from libml import data as libml_data
 from libml.utils import EasyDict
@@ -50,29 +51,66 @@ def _load_fold_4():
     return _load_fold(4)
 
 def _load_fold(fold):
-    def unflatten(images):
-        return np.transpose(images.reshape((-1, 3, 224, 224)),
-                            [0, 3, 2, 1])
+
+    def get_labeled_files(root_folder):
+        clas = []
+        files = []
+        for cla in os.listdir(root_folder):
+            for file in os.listdir(os.path.join(root_folder, cla)):
+                if file.endswith(".png"):
+                    files.append(file)
+                    clas.append(cla)
+
+        files = np.reshape(files, (-1, 1))
+        clas = np.reshape(clas, (-1, 1))
+        y = np.hstack((files, clas))
+        np.random.shuffle(y)
+        return y
+    
+    def get_unlabeled_files(root_folder):
+        files = []
+        for file in os.listdir(root_folder):
+            if file.endswith(".png"):
+                files.append(file)
+
+        y = np.reshape(files, (-1, 1))
+        np.random.shuffle(y)
+        return y
+    
+    def load_images(root_folder, files):
+        images = np.zeros((files.shape[0], input_shape[0], input_shape[1], input_shape[2]))
+        if files.shape[1] == 2:
+            for it, f in enumerate(tqdm(files[:,0])):
+                img = Image.open(os.path.join(root_folder, str(files[it,1]), f))
+                img.load()
+                images[it] = np.asarray(img, dtype="int32")[:,:,:3]
+        else:
+            for it, f in enumerate(tqdm(files)):
+                img = Image.open(os.path.join(root_folder, f[0]))
+                img.load()
+                images[it] = np.asarray(img, dtype="int32")[:,:,:3]
+        return images
+    
+    root_train = os.path.join("data","train","fold_%d"%fold)
+    l_train = get_labeled_files(root_train)
+    np.savetxt(os.path.join("data", "train_fold_%d.txt"%fold), l_train, fmt="%s %s")
+
+    root_test = os.path.join("data","test","fold_%d"%fold)
+    l_test = get_unlabeled_files(root_test)
+    np.savetxt(os.path.join("data", "test_fold_%d.txt"%fold), l_test, fmt="%s")
+    
+    root_unsupervised_train = os.path.join("data","unsupervised_train","_")
+    l_unsupervised_train = get_unlabeled_files(root_unsupervised_train)
+    np.savetxt(os.path.join("data", "unsupervised_train%d.txt"%fold), l_test, fmt="%s")
     
     input_shape=(224,224,3)
 
-    y_train_filename = os.path.join("data", "train_fold_%d.txt"%fold)
-    y_test_filename = os.path.join("data", "test_fold_%d.txt"%fold)
-    y_unsupervised_train_filename = os.path.join("data", "unsupervised_train.txt")
-
-    l_train = np.genfromtxt(y_train_filename, usecols=[1], delimiter=" ", dtype='int32')
-
-    f_train = np.genfromtxt(y_train_filename, usecols=[0], delimiter=" ", dtype='str')
-    f_test = np.genfromtxt(y_test_filename, usecols=[0], dtype='str')
-    f_unsupervised_train = np.genfromtxt(y_unsupervised_train_filename, usecols=[0], dtype='str')
-
-    x_train = np.zeros((np.size(f_train), input_shape[0], input_shape[1], input_shape[2]))
-    x_test = np.zeros((np.size(f_test), input_shape[0], input_shape[1], input_shape[2]))
-    x_unsupervised_train = np.zeros((np.size(f_unsupervised_train), input_shape[0], input_shape[1], input_shape[2]))
-
-
+    x_train = load_images(root_train, l_train)
+    x_test = load_images(root_test, l_test)
+    x_unsupervised_train = load_images(root_unsupervised_train, l_unsupervised_train)
+    
     train_set = {'images': x_train,
-                 'labels': l_train}
+                 'labels': l_train[:,1].astype(np.uint8)}
 
     test_set = {'images': x_test,
                 'labels': np.zeros(x_test.shape[0], dtype=np.uint8)}
@@ -80,9 +118,9 @@ def _load_fold(fold):
     unlabeled_set = {'images': x_unsupervised_train,
                      'labels': np.zeros(x_unsupervised_train.shape[0], dtype=np.uint8)}
 
-    train_set['images'] = _encode_png(unflatten(train_set['images']))
-    test_set['images'] = _encode_png(unflatten(test_set['images']))
-    unlabeled_set['images'] = _encode_png(unflatten(unlabeled_set['images']))
+    train_set['images'] = _encode_png(train_set['images'])
+    test_set['images'] = _encode_png(test_set['images'])
+    unlabeled_set['images'] = _encode_png(unlabeled_set['images'])
     return dict(train=train_set, test=test_set, unlabeled=unlabeled_set)
 
 def _encode_png(images):
