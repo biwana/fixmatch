@@ -16,13 +16,14 @@ import functools
 import json
 import os.path
 import shutil
+from PIL import Image
 
 import numpy as np
 import tensorflow as tf
 from absl import flags
 from tqdm import trange, tqdm
 
-from libml import data, utils
+from libml import data, utils, helper
 from libml.utils import EasyDict
 
 FLAGS = flags.FLAGS
@@ -35,6 +36,8 @@ flags.DEFINE_integer('report_kimg', 64, 'Report summary period in kibi-samples.'
 flags.DEFINE_integer('save_kimg', 64, 'Save checkpoint period in kibi-samples.')
 flags.DEFINE_integer('keep_ckpt', 50, 'Number of checkpoints to keep.')
 flags.DEFINE_string('eval_ckpt', '', 'Checkpoint to evaluate. If provided, do not do training, just do eval.')
+flags.DEFINE_string('eval_print_dir', '', 'Print out predictions into given folder.')
+flags.DEFINE_string('eval_print_images_dir', '', 'Print out predictions in images into a given folder.')
 flags.DEFINE_string('rerun', '', 'A string to identify a run if running multiple ones with same parameters.')
 
 
@@ -234,7 +237,22 @@ class ClassifySemi(Model):
                     })
                 predicted.append(p)
             predicted = np.concatenate(predicted, axis=0)
-            accuracies.append((predicted.argmax(1) == labels).mean() * 100)
+            y_preds = predicted.argmax(1)
+            if subset == "test" and ( FLAGS.eval_print_dir or FLAGS.eval_print_images_dir ):
+                files = np.genfromtxt(os.path.join(FLAGS.data_dir, "test_%s.txt"%FLAGS.dataset), dtype=str)
+                if FLAGS.eval_print_dir:
+                    np.savetxt(os.path.join(FLAGS.eval_print_dir, "test_results_%s.txt"%FLAGS.dataset), np.transpose([files, np.rint(y_preds)]).astype(str), fmt="%s %s")
+                    print("Results saved")
+                if FLAGS.eval_print_images_dir:
+                    print("Printing start")
+                    for file, y_pred in zip(files, y_preds):
+                        y_color = np.zeros((224, 224, 3))
+                        for j in range(5):
+                            y_color[y_pred == j] = helper.num_to_color(j+1)
+                        img = Image.fromarray(np.uint8(y_color))
+                        y_color.save(os.path.join(FLAGS.eval_print_images_dir, FLAGS.dataset, file), 'PNG', quality=100, optimize=True)
+                    print("Printing end")
+            accuracies.append((y_preds == labels).mean() * 100)
         if verbose:
             self.train_print('kimg %-5d  accuracy train/valid/test  %.2f  %.2f  %.2f' %
                              tuple([self.tmp.step >> 10] + accuracies))
